@@ -1,0 +1,128 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+import sqlite3
+import random
+from datetime import datetime, timedelta
+
+
+# Conectando (ou criando) o banco de dados
+conexao = sqlite3.connect('loja.db')
+cursor = conexao.cursor()
+
+# Criando a tabela (se não existir)
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS vendas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produto TEXT,
+    categoria TEXT,
+    valor REAL,
+    data_venda DATE
+)
+''')
+
+# Lista de produtos (Mantive os seus de eletrônicos)
+produtos = [
+    ('Notebook Dell', 'Eletrônicos', 3500.00),
+    ('Mouse Logitech', 'Periféricos', 80.00),
+    ('Teclado Mecânico', 'Periféricos', 250.00),
+    ('Monitor LG 24', 'Eletrônicos', 900.00),
+    ('Cadeira Ergonômica', 'Móveis', 1200.00),
+    ('Mesa de Escritório', 'Móveis', 450.00)
+]
+
+# Inserindo um OUTLIER proposital para testarmos depois (Ex: um mouse de 5 mil reais)
+# Isso é importante para provar que seu código de análise funciona!
+print("Gerando dados sintéticos...")
+for _ in range(1000):
+    item = random.choice(produtos)
+    # Variação normal de preço (90% a 110%)
+    preco_final = round(item[2] * random.uniform(0.9, 1.1), 2)
+    
+    # Simula um erro de digitação ou fraude aleatória (Outlier) em 1% dos casos
+    if random.random() < 0.01: 
+        preco_final = preco_final * 5  # Preço 5x maior que o normal
+
+    dias_atras = random.randint(0, 365)
+    data_venda = (datetime.now() - timedelta(days=dias_atras)).strftime('%Y-%m-%d')
+    
+    cursor.execute('''
+    INSERT INTO vendas (produto, categoria, valor, data_venda)
+    VALUES (?, ?, ?, ?)
+    ''', (item[0], item[1], preco_final, data_venda))
+
+conexao.commit()
+conexao.close()
+
+
+# Conexão e Leitura
+conexao = sqlite3.connect('loja.db')
+df = pd.read_sql_query("SELECT * FROM vendas", conexao)
+conexao.close()
+
+# 1. KPIs Básicos
+print(f"Total de vendas: R$ {df['valor'].sum():,.2f}")
+print(f"Ticket médio: R$ {df['valor'].mean():,.2f}")
+
+# 2. Vendas por Categoria (Gráfico de Barras)
+vendas_por_categoria = df.groupby('categoria')['valor'].sum().sort_values(ascending=False)
+plt.figure(figsize=(8,5))
+vendas_por_categoria.plot(kind='bar', color=['#4c72b0', '#55a868', '#c44e52'])
+plt.title('Vendas por Categoria')
+plt.xlabel('Categoria')
+plt.ylabel('Vendas (R$)')
+plt.xticks(rotation=0)
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.show()
+
+# 3. Evolução Temporal (Gráfico de Linha)
+df['data_venda'] = pd.to_datetime(df['data_venda'])
+vendas_por_mes = df.groupby(df['data_venda'].dt.to_period('M'))['valor'].sum()
+
+plt.figure(figsize=(10,5))
+vendas_por_mes.plot(kind='line', marker='o', color='purple', linewidth=2)
+plt.title('Evolução de Vendas por Mês')
+plt.ylabel('Vendas R$')
+plt.grid(True, linestyle='--', alpha=0.5)
+ax = plt.gca()
+ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: format(int(x), ',').replace(',', '.')))
+plt.show()
+
+
+# Carregar dados
+conexao = sqlite3.connect('loja.db')
+df = pd.read_sql_query("SELECT * FROM vendas", conexao)
+conexao.close()
+
+print("--- INICIANDO DETECÇÃO DE OUTLIERS (MÉTODO IQR) ---")
+
+# Função para detectar outliers em um grupo
+def identificar_outliers(grupo):
+    Q1 = grupo['valor'].quantile(0.25)
+    Q3 = grupo['valor'].quantile(0.75)
+    IQR = Q3 - Q1
+    limite_inferior = Q1 - 1.5 * IQR
+    limite_superior = Q3 + 1.5 * IQR
+    
+    # Retorna apenas as linhas que são outliers
+    return grupo[(grupo['valor'] < limite_inferior) | (grupo['valor'] > limite_superior)]
+
+# Aplica a função para cada produto separadamente
+# (Porque um notebook de 5k é normal, mas um mouse de 5k é outlier)
+outliers = df.groupby('produto').apply(identificar_outliers).reset_index(drop=True)
+
+if not outliers.empty:
+    print(f"\n🚨 Foram encontradas {len(outliers)} transações suspeitas!")
+    print(outliers[['produto', 'valor', 'data_venda']].sort_values(by='valor', ascending=False).head(10))
+else:
+    print("\n✅ Nenhuma anomalia detectada.")
+
+# Visualização: Boxplot para ver os outliers visualmente
+plt.figure(figsize=(10, 6))
+df.boxplot(column='valor', by='produto', grid=False, rot=45)
+plt.title('Distribuição de Preços por Produto (Com Outliers)')
+plt.suptitle('') # Remove título automático do pandas
+plt.ylabel('Valor (R$)')
+plt.xlabel('Produto')
+plt.show()
+
