@@ -41,5 +41,5 @@ Crie um comando que detecta quais são os Outleirs
 ---
 *Este projeto foi desenvolvido para fins de estudo e portfólio na área de Análise de Dados.*
 Análise de outliers diretamente no Excel: [dados_ficticios_vendas.xlsx](https://github.com/user-attachments/files/24243851/dados_ficticios_vendas.xlsx)
-Análise de outliers diretamente no Python: [analise_outliers.xlsx](https://github.com/user-attachments/files/24243867/analise_outliers.xlsx)
+
 
